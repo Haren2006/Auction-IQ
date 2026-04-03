@@ -1,0 +1,59 @@
+{
+  "created_at_utc": "2026-04-02T22:34:17.930094+00:00",
+  "dataset_path": "/content/auction_snapshots.csv",
+  "feature_columns": [
+    "item_name",
+    "auction_type",
+    "snapshot_pct",
+    "auction_days",
+    "snapshot_time_days",
+    "opening_bid",
+    "bid_count_so_far",
+    "unique_bidders_so_far",
+    "max_observed_bid_so_far",
+    "leading_bidder_rate_so_far"
+  ],
+  "categorical_columns": [
+    "item_name",
+    "auction_type",
+    "snapshot_pct"
+  ],
+  "numeric_columns": [
+    "auction_days",
+    "snapshot_time_days",
+    "opening_bid",
+    "bid_count_so_far",
+    "unique_bidders_so_far",
+    "max_observed_bid_so_far",
+    "leading_bidder_rate_so_far"
+  ],
+  "target_column": "final_price",
+  "group_column": "auction_id",
+  "snapshot_stage_column": "snapshot_pct",
+  "numeric_feature_medians": {
+    "auction_days": 7.0,
+    "snapshot_time_days": 4.375,
+    "opening_bid": 24.994999999999997,
+    "bid_count_so_far": 7.0,
+    "unique_bidders_so_far": 4.0,
+    "max_observed_bid_so_far": 182.75,
+    "leading_bidder_rate_so_far": 6.0
+  },
+  "feature_importance_raw": {
+    "max_observed_bid_so_far": 0.7651097005320842,
+    "opening_bid": 0.18776619458690844,
+    "item_name": 0.01114217882964793,
+    "unique_bidders_so_far": 0.00945308413796204,
+    "bid_count_so_far": 0.008659751189246306,
+    "snapshot_time_days": 0.00637785823492787,
+    "leading_bidder_rate_so_far": 0.005742446105765555,
+    "snapshot_pct": 0.002329033817017097,
+    "auction_type": 0.002109092111051174,
+    "auction_days": 0.0013106604553893813
+  },
+  "limitations": [
+    "Built from historical sold-auction snapshots only.",
+    "No seller reputation, item condition text, images, or calendar-time context.",
+    "Proxy-bidding behavior may make bidding dynamics appear non-monotonic."
+  ]
+}
