@@ -1,14 +1,28 @@
-import math
-from typing import Dict, Any, List
+from __future__ import annotations
 
+from typing import Any, Dict
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+
+from auction_iq_backend import (
+    AUCTION_TYPES,
+    CHECKPOINTS,
+    ITEM_OPTIONS,
+    build_explanation,
+    load_week11_metrics,
+    load_week9_metrics,
+    missing_artifact_paths,
+    predict_snapshot,
+    seller_scenarios,
+    validate_snapshot,
+)
 
 
 st.set_page_config(
     page_title="Auction IQ",
-    page_icon="📈",
+    page_icon="AIQ",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -16,8 +30,9 @@ st.set_page_config(
 
 EXAMPLE_ROWS = [
     {
-        "label": "Palm Pilot · 50% progress",
+        "label": "Palm Pilot · 7 day · 50% progress",
         "item_name": "Palm Pilot M515 PDA",
+        "auction_type": "7 day auction",
         "auction_progress": 0.50,
         "opening_bid": 25.0,
         "current_price": 72.0,
@@ -26,8 +41,9 @@ EXAMPLE_ROWS = [
         "highest_observed_bid": 72.0,
     },
     {
-        "label": "Xbox · 85% progress",
+        "label": "Xbox · 7 day · 85% progress",
         "item_name": "Xbox game console",
+        "auction_type": "7 day auction",
         "auction_progress": 0.85,
         "opening_bid": 40.0,
         "current_price": 118.0,
@@ -36,8 +52,9 @@ EXAMPLE_ROWS = [
         "highest_observed_bid": 118.0,
     },
     {
-        "label": "Cartier · 90% progress",
+        "label": "Cartier · 7 day · 90% progress",
         "item_name": "Cartier wristwatch",
+        "auction_type": "7 day auction",
         "auction_progress": 0.90,
         "opening_bid": 500.0,
         "current_price": 1850.0,
@@ -47,12 +64,7 @@ EXAMPLE_ROWS = [
     },
 ]
 
-CHECKPOINTS = [25, 50, 75, 85, 90, 95]
 
-
-# =========================
-# Styling
-# =========================
 st.markdown(
     """
     <style>
@@ -88,148 +100,8 @@ st.markdown(
 )
 
 
-def predict_point(snapshot: Dict[str, Any]) -> float:
-    progress = snapshot["auction_progress"]
-    current_price = snapshot["current_price"]
-    n_bids = snapshot["num_bids_so_far"]
-    n_bidders = snapshot["num_unique_bidders_so_far"]
-    opening_bid = snapshot["opening_bid"]
-    highest_observed_bid = snapshot["highest_observed_bid"]
-
-    growth_factor = 1.0 + (1.15 * (1.0 - progress))
-    bid_signal = 1.0 + min(n_bids, 25) * 0.012 + min(n_bidders, 12) * 0.018
-    competition_signal = 1.0 + min(max(highest_observed_bid - current_price, 0), 500) / 10000
-    opening_signal = 0.08 * opening_bid
-
-    pred = current_price * growth_factor * bid_signal * competition_signal + opening_signal
-    return round(max(pred, current_price), 2)
-
-
-def predict_quantiles(snapshot: Dict[str, Any], point_pred: float | None = None) -> Dict[str, float]:
-    if point_pred is None:
-        point_pred = predict_point(snapshot)
-
-    progress = snapshot["auction_progress"]
-    spread = max(0.08, 0.28 - 0.18 * progress)
-
-    q10 = max(snapshot["current_price"], point_pred * (1 - spread))
-    q50 = max(snapshot["current_price"], point_pred * (1 - spread * 0.30))
-    q75 = max(snapshot["current_price"], point_pred * (1 + spread * 0.20))
-    q90 = max(snapshot["current_price"], point_pred * (1 + spread * 0.45))
-
-    ordered = sorted([q10, q50, q75, q90])
-    return {
-        "q10": round(ordered[0], 2),
-        "q50": round(ordered[1], 2),
-        "q75": round(ordered[2], 2),
-        "q90": round(ordered[3], 2),
-    }
-
-
-def buyer_recommendation(snapshot: Dict[str, Any], quantiles: Dict[str, float], aggressiveness: str) -> Dict[str, Any]:
-    threshold_map = {
-        "Conservative": quantiles["q50"],
-        "Balanced": quantiles["q75"],
-        "Aggressive": quantiles["q90"],
-    }
-    threshold = threshold_map[aggressiveness]
-    current_price = snapshot["current_price"]
-    decision = "PASS" if current_price >= threshold else "BID"
-    headroom = round(threshold - current_price, 2)
-
-    return {
-        "decision": decision,
-        "threshold": round(threshold, 2),
-        "current_price": round(current_price, 2),
-        "headroom": headroom,
-        "aggressiveness": aggressiveness,
-    }
-
-
-def seller_scenarios(snapshot: Dict[str, Any]) -> pd.DataFrame:
-    base = snapshot.copy()
-    scenarios = []
-    for pct in [-0.20, -0.10, 0.0, 0.10, 0.20]:
-        modified = base.copy()
-        modified["opening_bid"] = max(0.01, base["opening_bid"] * (1 + pct))
-        pred = predict_point(modified)
-        scenarios.append(
-            {
-                "Scenario": f"{pct:+.0%}",
-                "Opening bid": round(modified["opening_bid"], 2),
-                "Predicted final price": round(pred, 2),
-                "Change vs current setup": round(pred - predict_point(base), 2),
-            }
-        )
-    return pd.DataFrame(scenarios)
-
-
-def driver_summary(snapshot: Dict[str, Any]) -> List[str]:
-    signals = []
-    progress_pct = int(snapshot["auction_progress"] * 100)
-    if progress_pct >= 85:
-        signals.append("Late-stage snapshot gives stronger signal")
-    else:
-        signals.append("Earlier snapshot means more uncertainty")
-
-    if snapshot["num_bids_so_far"] >= 12:
-        signals.append("High bidding activity so far")
-    else:
-        signals.append("Moderate bidding activity so far")
-
-    if snapshot["num_unique_bidders_so_far"] >= 5:
-        signals.append("More bidder competition detected")
-    else:
-        signals.append("Limited bidder competition so far")
-
-    if snapshot["highest_observed_bid"] > snapshot["current_price"]:
-        signals.append("Highest observed bid suggests room above current price")
-    else:
-        signals.append("Highest observed bid is close to current price")
-
-    return signals
-
-
-def build_explanation(snapshot: Dict[str, Any], point_pred: float, quantiles: Dict[str, float], mode: str) -> Dict[str, str]:
-    progress_pct = int(snapshot["auction_progress"] * 100)
-    n_bids = snapshot["num_bids_so_far"]
-    n_bidders = snapshot["num_unique_bidders_so_far"]
-
-    what_model_expects = (
-        f"The model expects later snapshots to be more informative. This input is at {progress_pct}% progress, "
-        f"with {n_bids} bids and {n_bidders} unique bidders so far."
-    )
-
-    why = (
-        f"Current price, opening bid, bid count, unique bidders, highest observed bid, and auction progress are driving the estimate. "
-        f"The point prediction is ${point_pred:,.2f} and the likely range runs from q10 ${quantiles['q10']:,.2f} to q90 ${quantiles['q90']:,.2f}."
-    )
-
-    if mode == "buyer":
-        suggested_action = (
-            f"Use the aggressiveness thresholds as guardrails. Conservative uses q50, balanced uses q75, and aggressive uses q90. "
-            f"If the live price is already above your chosen threshold, the recommendation becomes PASS."
-        )
-    else:
-        suggested_action = (
-            "Use the seller scenario sweep to compare slightly lower or higher opening bids. Treat the chart as directional strategy guidance, not a guarantee."
-        )
-
-    limitations = (
-        "This UI cannot see listing quality, seller reputation, photos, description quality, sniping, outside demand shocks, or bidder intent. Early-stage snapshots are less certain than late-stage snapshots."
-    )
-
-    return {
-        "What the model expects": what_model_expects,
-        "Why": why,
-        "Suggested action": suggested_action,
-        "What this model cannot know": limitations,
-    }
-
-
-
-def currency(x: float) -> str:
-    return f"${x:,.2f}"
+def currency(value: float) -> str:
+    return f"${value:,.2f}"
 
 
 def progress_stage(progress: float) -> str:
@@ -243,15 +115,23 @@ def progress_stage(progress: float) -> str:
     return "Early"
 
 
-def validate_snapshot(snapshot: Dict[str, Any]) -> List[str]:
-    issues = []
-    if snapshot["current_price"] < snapshot["opening_bid"]:
-        issues.append("Current price is below opening bid. Check the input values.")
-    if snapshot["highest_observed_bid"] < snapshot["current_price"]:
-        issues.append("Highest observed bid should usually be at least the current price.")
-    if snapshot["num_unique_bidders_so_far"] > snapshot["num_bids_so_far"]:
-        issues.append("Unique bidders cannot exceed total bids.")
-    return issues
+def buyer_recommendation(snapshot: Dict[str, Any], quantiles: Dict[str, float], aggressiveness: str) -> Dict[str, Any]:
+    threshold_map = {
+        "Conservative": quantiles["q50"],
+        "Balanced": quantiles["q75"],
+        "Aggressive": quantiles["q90"],
+    }
+    threshold = threshold_map[aggressiveness]
+    current_price = snapshot["current_price"]
+    decision = "PASS" if current_price >= threshold else "BID"
+
+    return {
+        "decision": decision,
+        "threshold": round(threshold, 2),
+        "current_price": round(current_price, 2),
+        "headroom": round(threshold - current_price, 2),
+        "aggressiveness": aggressiveness,
+    }
 
 
 def get_snapshot_input(prefix: str) -> Dict[str, Any]:
@@ -271,17 +151,36 @@ def get_snapshot_input(prefix: str) -> Dict[str, Any]:
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        item_name = st.text_input("Item name", value="Auction item", key=f"{prefix}_item_name")
-        opening_bid = st.number_input("Opening bid", min_value=0.0, value=25.0, step=1.0, key=f"{prefix}_opening_bid")
-        current_price = st.number_input("Current price", min_value=0.0, value=60.0, step=1.0, key=f"{prefix}_current_price")
+        item_name = st.selectbox("Item name", ITEM_OPTIONS, index=1, key=f"{prefix}_item_name")
+        auction_type = st.selectbox("Auction type", AUCTION_TYPES, index=2, key=f"{prefix}_auction_type")
+        opening_bid = st.number_input(
+            "Opening bid",
+            min_value=0.0,
+            value=25.0,
+            step=1.0,
+            key=f"{prefix}_opening_bid",
+        )
     with col2:
+        current_price = st.number_input(
+            "Current price",
+            min_value=0.0,
+            value=60.0,
+            step=1.0,
+            key=f"{prefix}_current_price",
+        )
         auction_progress_pct = st.select_slider(
             "Auction progress (%)",
             options=CHECKPOINTS,
             value=75,
             key=f"{prefix}_progress",
         )
-        num_bids_so_far = st.number_input("Number of bids so far", min_value=0, value=10, step=1, key=f"{prefix}_num_bids")
+        num_bids_so_far = st.number_input(
+            "Number of bids so far",
+            min_value=0,
+            value=10,
+            step=1,
+            key=f"{prefix}_num_bids",
+        )
     with col3:
         num_unique_bidders_so_far = st.number_input(
             "Unique bidders so far",
@@ -301,6 +200,7 @@ def get_snapshot_input(prefix: str) -> Dict[str, Any]:
     return {
         "label": "Manual input",
         "item_name": item_name,
+        "auction_type": auction_type,
         "auction_progress": auction_progress_pct / 100.0,
         "opening_bid": float(opening_bid),
         "current_price": float(current_price),
@@ -310,59 +210,62 @@ def get_snapshot_input(prefix: str) -> Dict[str, Any]:
     }
 
 
-def render_snapshot_summary(snapshot: Dict[str, Any]):
+def render_snapshot_summary(snapshot: Dict[str, Any]) -> None:
     stage = progress_stage(snapshot["auction_progress"])
     st.markdown("<div class='auction-card'>", unsafe_allow_html=True)
     st.markdown(f"### {snapshot['item_name']}")
     st.markdown(
+        f"<span class='pill'>{snapshot['auction_type']}</span>"
         f"<span class='pill'>{int(snapshot['auction_progress'] * 100)}% progress</span>"
         f"<span class='pill'>{stage} stage</span>"
         f"<span class='pill'>{snapshot['num_bids_so_far']} bids</span>"
         f"<span class='pill'>{snapshot['num_unique_bidders_so_far']} bidders</span>",
         unsafe_allow_html=True,
     )
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Opening bid", currency(snapshot["opening_bid"]))
-    c2.metric("Current price", currency(snapshot["current_price"]))
-    c3.metric("Highest observed bid", currency(snapshot["highest_observed_bid"]))
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Opening bid", currency(snapshot["opening_bid"]))
+    col2.metric("Current price", currency(snapshot["current_price"]))
+    col3.metric("Highest observed bid", currency(snapshot["highest_observed_bid"]))
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_prediction_cards(point_pred: float, quantiles: Dict[str, float]):
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Point estimate", currency(point_pred))
-    c2.metric("q10", currency(quantiles["q10"]))
-    c3.metric("q50", currency(quantiles["q50"]))
-    c4.metric("q75", currency(quantiles["q75"]))
-    c5.metric("q90", currency(quantiles["q90"]))
+def render_prediction_cards(point_pred: float, quantiles: Dict[str, float]) -> None:
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Point estimate", currency(point_pred))
+    col2.metric("q10", currency(quantiles["q10"]))
+    col3.metric("q50", currency(quantiles["q50"]))
+    col4.metric("q75", currency(quantiles["q75"]))
+    col5.metric("q90", currency(quantiles["q90"]))
 
 
-def render_quantile_range(quantiles: Dict[str, float], current_price: float):
+def render_quantile_range(quantiles: Dict[str, float], current_price: float) -> None:
     st.subheader("Quantile range")
     st.markdown(
-        f"Likely outcome band: **{currency(quantiles['q10'])} → {currency(quantiles['q90'])}**  \\n"
+        f"Likely outcome band: **{currency(quantiles['q10'])} -> {currency(quantiles['q90'])}**  \n"
         f"Typical / median outcome: **{currency(quantiles['q50'])}**"
     )
-
-    q_df = pd.DataFrame(
+    frame = pd.DataFrame(
         {
             "Quantile": ["Current", "q10", "q50", "q75", "q90"],
-            "Price": [current_price, quantiles["q10"], quantiles["q50"], quantiles["q75"], quantiles["q90"]],
+            "Price": [
+                current_price,
+                quantiles["q10"],
+                quantiles["q50"],
+                quantiles["q75"],
+                quantiles["q90"],
+            ],
         }
     )
-    st.dataframe(q_df, use_container_width=True, hide_index=True)
+    st.dataframe(frame, use_container_width=True, hide_index=True)
 
 
-
-def render_buyer_threshold_cards(rec: Dict[str, Any], quantiles: Dict[str, float]):
+def render_buyer_threshold_cards(rec: Dict[str, Any], quantiles: Dict[str, float]) -> None:
     st.subheader("Buyer PASS / threshold cards")
-
     labels = [
         ("Conservative", quantiles["q50"]),
         ("Balanced", quantiles["q75"]),
         ("Aggressive", quantiles["q90"]),
     ]
-
     cols = st.columns(3)
     for col, (label, threshold) in zip(cols, labels):
         decision = "PASS" if rec["current_price"] >= threshold else "BID"
@@ -376,60 +279,96 @@ def render_buyer_threshold_cards(rec: Dict[str, Any], quantiles: Dict[str, float
                 st.success(f"{decision} · current price is below threshold")
 
     st.info(
-        f"Selected recommendation: **{rec['aggressiveness']} → {rec['decision']}** at threshold **{currency(rec['threshold'])}**."
+        f"Selected recommendation: **{rec['aggressiveness']} -> {rec['decision']}** "
+        f"at threshold **{currency(rec['threshold'])}**."
     )
 
 
-
-def render_seller_chart(scenarios_df: pd.DataFrame):
+def render_seller_chart(scenarios_df: pd.DataFrame) -> None:
     st.subheader("Seller scenario chart")
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    ax.plot(scenarios_df["Opening bid"], scenarios_df["Predicted final price"], marker="o", linewidth=2)
+    ax.plot(
+        scenarios_df["Opening bid"],
+        scenarios_df["Predicted final price"],
+        marker="o",
+        linewidth=2,
+    )
     ax.set_xlabel("Opening bid")
     ax.set_ylabel("Predicted final price")
     ax.set_title("Opening-bid scenario sweep")
     ax.grid(True, alpha=0.3)
 
     for _, row in scenarios_df.iterrows():
-        ax.annotate(row["Scenario"], (row["Opening bid"], row["Predicted final price"]), textcoords="offset points", xytext=(0, 8), ha="center")
+        ax.annotate(
+            row["Scenario"],
+            (row["Opening bid"], row["Predicted final price"]),
+            textcoords="offset points",
+            xytext=(0, 8),
+            ha="center",
+        )
 
     st.pyplot(fig, clear_figure=True)
     st.dataframe(scenarios_df, use_container_width=True, hide_index=True)
 
 
-
-def render_driver_summary(snapshot: Dict[str, Any]):
+def render_driver_summary(prediction: Dict[str, Any]) -> None:
     st.subheader("Key drivers from this input")
-    for item in driver_summary(snapshot):
-        st.markdown(f"- {item}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Upside signals**")
+        for item in prediction["top_positive_factors"]:
+            st.markdown(f"- {item}")
+    with col2:
+        st.markdown("**Caution signals**")
+        for item in prediction["top_negative_factors"]:
+            st.markdown(f"- {item}")
 
 
-
-def render_explanation(expl: Dict[str, str]):
+def render_explanation(explanation: Dict[str, str]) -> None:
     st.subheader("Explanation + limitations")
-    for title, body in expl.items():
-        with st.expander(title, expanded=True if title == "What the model expects" else False):
+    for title, body in explanation.items():
+        with st.expander(title, expanded=title == "What the model expects"):
             st.write(body)
 
 
+missing_paths = missing_artifact_paths()
+
 st.title("Auction IQ")
-st.caption("Week 13 UI integration for buyer and seller decision support.")
+st.caption("Snapshot-based buyer and seller decision support powered by Week 9 and Week 11 models.")
 
 with st.sidebar:
-    st.header("About this UI")
+    st.header("About this app")
     st.write(
-        "This interface is built around snapshot-based auction inputs, buyer quantile thresholds, and seller opening-bid scenarios."
+        "This interface uses the trained Week 9 point model and Week 11 quantile models "
+        "from the local `models/` directory."
     )
-    st.info(
-        "When the real backend is ready, replace the fallback functions at the top with your saved point model, quantile models, and explanation layer."
-    )
-    st.markdown("**Current checkpoints used in the UI:** 25%, 50%, 75%, 85%, 90%, 95%")
+    if missing_paths:
+        st.error(
+            "Missing model artifacts:\n- " + "\n- ".join(path.name for path in missing_paths)
+        )
+    else:
+        week9_rmse = load_week9_metrics()["overall"]["random_forest_point_model"]["rmse"]
+        week11_coverage = load_week11_metrics()["intervals"]["q10_q90"]["coverage"]
+        st.success("Loaded point and quantile artifacts from `./models`.")
+        st.caption(
+            f"Week 9 point model RMSE: {week9_rmse:.1f} | "
+            f"Week 11 q10-q90 coverage: {week11_coverage:.1%}"
+        )
+    st.markdown("**Supported checkpoints:** 25%, 50%, 75%, 85%, 90%, 95%, 100%")
+    st.caption("`leading_bidder_rate_so_far` defaults to the training-set median (6.0).")
+
+if missing_paths:
+    st.stop()
+
 
 buyer_tab, seller_tab = st.tabs(["Buyer", "Seller"])
 
 with buyer_tab:
     st.header("Buyer")
-    st.markdown("<p class='section-note'>Use this tab to evaluate whether the current auction price still fits your bidding style.</p>", unsafe_allow_html=True)
+    st.markdown(
+        "<p class='section-note'>Use this tab to evaluate whether the current auction price still fits your bidding style.</p>",
+        unsafe_allow_html=True,
+    )
     buyer_snapshot = get_snapshot_input("buyer")
     render_snapshot_summary(buyer_snapshot)
 
@@ -445,20 +384,22 @@ with buyer_tab:
             st.warning(issue)
 
     if st.button("Run buyer prediction", type="primary", use_container_width=True):
-        point_pred = predict_point(buyer_snapshot)
-        quantiles = predict_quantiles(buyer_snapshot, point_pred)
-        rec = buyer_recommendation(buyer_snapshot, quantiles, aggressiveness)
-        expl = build_explanation(buyer_snapshot, point_pred, quantiles, mode="buyer")
+        prediction = predict_snapshot(buyer_snapshot)
+        rec = buyer_recommendation(buyer_snapshot, prediction["quantiles"], aggressiveness)
+        explanation = build_explanation(buyer_snapshot, prediction, mode="buyer")
 
-        render_prediction_cards(point_pred, quantiles)
-        render_quantile_range(quantiles, buyer_snapshot["current_price"])
-        render_buyer_threshold_cards(rec, quantiles)
-        render_driver_summary(buyer_snapshot)
-        render_explanation(expl)
+        render_prediction_cards(prediction["point_estimate"], prediction["quantiles"])
+        render_quantile_range(prediction["quantiles"], buyer_snapshot["current_price"])
+        render_buyer_threshold_cards(rec, prediction["quantiles"])
+        render_driver_summary(prediction)
+        render_explanation(explanation)
 
 with seller_tab:
     st.header("Seller")
-    st.markdown("<p class='section-note'>Use this tab to compare how small changes in opening bid may shift the predicted final price.</p>", unsafe_allow_html=True)
+    st.markdown(
+        "<p class='section-note'>Use this tab to compare how small changes in opening bid may shift the predicted final price.</p>",
+        unsafe_allow_html=True,
+    )
     seller_snapshot = get_snapshot_input("seller")
     render_snapshot_summary(seller_snapshot)
 
@@ -468,13 +409,12 @@ with seller_tab:
             st.warning(issue)
 
     if st.button("Run seller prediction", type="primary", use_container_width=True):
-        point_pred = predict_point(seller_snapshot)
-        quantiles = predict_quantiles(seller_snapshot, point_pred)
+        prediction = predict_snapshot(seller_snapshot)
         scenarios_df = seller_scenarios(seller_snapshot)
-        expl = build_explanation(seller_snapshot, point_pred, quantiles, mode="seller")
+        explanation = build_explanation(seller_snapshot, prediction, mode="seller")
 
-        render_prediction_cards(point_pred, quantiles)
-        render_quantile_range(quantiles, seller_snapshot["current_price"])
+        render_prediction_cards(prediction["point_estimate"], prediction["quantiles"])
+        render_quantile_range(prediction["quantiles"], seller_snapshot["current_price"])
         render_seller_chart(scenarios_df)
-        render_driver_summary(seller_snapshot)
-        render_explanation(expl)
+        render_driver_summary(prediction)
+        render_explanation(explanation)

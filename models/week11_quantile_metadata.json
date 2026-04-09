@@ -1,0 +1,113 @@
+{
+  "created_at_utc": "2026-04-02T22:24:21.967545+00:00",
+  "dataset_path": "/content/auction_snapshots (1).csv",
+  "feature_columns": [
+    "item_name",
+    "auction_type",
+    "snapshot_pct",
+    "auction_days",
+    "snapshot_time_days",
+    "opening_bid",
+    "bid_count_so_far",
+    "unique_bidders_so_far",
+    "max_observed_bid_so_far",
+    "leading_bidder_rate_so_far"
+  ],
+  "categorical_columns": [
+    "item_name",
+    "auction_type",
+    "snapshot_pct"
+  ],
+  "numeric_columns": [
+    "auction_days",
+    "snapshot_time_days",
+    "opening_bid",
+    "bid_count_so_far",
+    "unique_bidders_so_far",
+    "max_observed_bid_so_far",
+    "leading_bidder_rate_so_far"
+  ],
+  "target_column": "final_price",
+  "group_column": "auction_id",
+  "snapshot_stage_column": "snapshot_pct",
+  "quantile_levels": {
+    "q10": 0.1,
+    "q50": 0.5,
+    "q75": 0.75,
+    "q90": 0.9
+  },
+  "numeric_feature_medians": {
+    "auction_days": 7.0,
+    "snapshot_time_days": 4.375,
+    "opening_bid": 24.994999999999997,
+    "bid_count_so_far": 7.0,
+    "unique_bidders_so_far": 4.0,
+    "max_observed_bid_so_far": 182.75,
+    "leading_bidder_rate_so_far": 6.0
+  },
+  "feature_importance_raw_by_quantile": {
+    "q10": {
+      "max_observed_bid_so_far": 0.4189272616020811,
+      "item_name": 0.31234224453661763,
+      "opening_bid": 0.1009205077646201,
+      "snapshot_pct": 0.05864616155138616,
+      "snapshot_time_days": 0.02986744908025532,
+      "unique_bidders_so_far": 0.026945351474307502,
+      "leading_bidder_rate_so_far": 0.02225773862759066,
+      "bid_count_so_far": 0.014065996201784817,
+      "auction_days": 0.00804649734718501,
+      "auction_type": 0.007980791814171733
+    },
+    "q50": {
+      "max_observed_bid_so_far": 0.399909868244939,
+      "item_name": 0.25424092639728774,
+      "opening_bid": 0.1376817384358194,
+      "snapshot_pct": 0.08039138079205788,
+      "snapshot_time_days": 0.025896986098829074,
+      "unique_bidders_so_far": 0.02319368588436243,
+      "bid_count_so_far": 0.022302142325299534,
+      "auction_type": 0.021034424107482765,
+      "auction_days": 0.020295431092234084,
+      "leading_bidder_rate_so_far": 0.01505341662168817
+    },
+    "q75": {
+      "max_observed_bid_so_far": 0.6412572507094355,
+      "opening_bid": 0.10712946593117353,
+      "item_name": 0.09882565824060704,
+      "snapshot_pct": 0.05731766027478155,
+      "snapshot_time_days": 0.03138836204053886,
+      "unique_bidders_so_far": 0.0150866862027979,
+      "bid_count_so_far": 0.014739413014393736,
+      "leading_bidder_rate_so_far": 0.013766569680302616,
+      "auction_days": 0.011133671062569567,
+      "auction_type": 0.009355262843399648
+    },
+    "q90": {
+      "max_observed_bid_so_far": 0.6351913846845982,
+      "opening_bid": 0.1886104027769505,
+      "item_name": 0.053902282046691334,
+      "snapshot_time_days": 0.036481624226080346,
+      "snapshot_pct": 0.02852837539482228,
+      "bid_count_so_far": 0.019271716271499612,
+      "leading_bidder_rate_so_far": 0.017464342524337647,
+      "unique_bidders_so_far": 0.013798484252933207,
+      "auction_type": 0.0033771482814903813,
+      "auction_days": 0.0033742395405964454
+    }
+  },
+  "postprocess": {
+    "enforce_quantile_order": true,
+    "ordered_labels": [
+      "q10",
+      "q50",
+      "q75",
+      "q90"
+    ]
+  },
+  "limitations": [
+    "Built from historical sold-auction snapshots only.",
+    "No seller reputation, item condition text, images, or calendar-time context.",
+    "Proxy-bidding behavior may make bidding dynamics appear non-monotonic.",
+    "Quantile estimates are empirical and may still cross without post-processing on new inputs."
+  ]
+}
