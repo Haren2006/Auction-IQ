@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+import os
+from typing import Any, Dict, Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -18,6 +19,7 @@ from auction_iq_backend import (
     seller_scenarios,
     validate_snapshot,
 )
+from auction_iq_llm import LLM_OPTIONS, get_llm_response
 
 
 st.set_page_config(
@@ -27,42 +29,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-EXAMPLE_ROWS = [
-    {
-        "label": "Palm Pilot · 7 day · 50% progress",
-        "item_name": "Palm Pilot M515 PDA",
-        "auction_type": "7 day auction",
-        "auction_progress": 0.50,
-        "opening_bid": 25.0,
-        "current_price": 72.0,
-        "num_bids_so_far": 9,
-        "num_unique_bidders_so_far": 4,
-        "highest_observed_bid": 72.0,
-    },
-    {
-        "label": "Xbox · 7 day · 85% progress",
-        "item_name": "Xbox game console",
-        "auction_type": "7 day auction",
-        "auction_progress": 0.85,
-        "opening_bid": 40.0,
-        "current_price": 118.0,
-        "num_bids_so_far": 14,
-        "num_unique_bidders_so_far": 6,
-        "highest_observed_bid": 118.0,
-    },
-    {
-        "label": "Cartier · 7 day · 90% progress",
-        "item_name": "Cartier wristwatch",
-        "auction_type": "7 day auction",
-        "auction_progress": 0.90,
-        "opening_bid": 500.0,
-        "current_price": 1850.0,
-        "num_bids_so_far": 18,
-        "num_unique_bidders_so_far": 8,
-        "highest_observed_bid": 1850.0,
-    },
-]
 
 
 st.markdown(
@@ -93,6 +59,15 @@ st.markdown(
         margin-bottom: 0.3rem;
         border: 1px solid rgba(49, 51, 63, 0.12);
         background: #f5f7fb;
+    }
+    .llm-response {
+        border-left: 3px solid #4f8ef7;
+        padding: 0.75rem 1rem;
+        background: rgba(79, 142, 247, 0.05);
+        border-radius: 0 8px 8px 0;
+        margin-top: 0.5rem;
+        font-size: 0.97rem;
+        line-height: 1.6;
     }
     </style>
     """,
@@ -135,20 +110,6 @@ def buyer_recommendation(snapshot: Dict[str, Any], quantiles: Dict[str, float], 
 
 
 def get_snapshot_input(prefix: str) -> Dict[str, Any]:
-    mode = st.radio(
-        "Input mode",
-        ["Example mode", "Manual mode"],
-        horizontal=True,
-        key=f"{prefix}_mode",
-    )
-
-    if mode == "Example mode":
-        labels = [row["label"] for row in EXAMPLE_ROWS]
-        selected_label = st.selectbox("Choose a sample row", labels, key=f"{prefix}_example")
-        selected = next(row for row in EXAMPLE_ROWS if row["label"] == selected_label)
-        st.caption("Loaded from saved sample rows.")
-        return dict(selected)
-
     col1, col2, col3 = st.columns(3)
     with col1:
         item_name = st.selectbox("Item name", ITEM_OPTIONS, index=1, key=f"{prefix}_item_name")
@@ -331,6 +292,60 @@ def render_explanation(explanation: Dict[str, str]) -> None:
             st.write(body)
 
 
+def render_llm_panel(
+    mode: str,
+    snapshot: Dict[str, Any],
+    prediction: Dict[str, Any],
+    rec: Optional[Dict[str, Any]] = None,
+) -> None:
+    st.subheader("AI Analysis")
+    api_key = st.session_state.get("anthropic_api_key", "")
+
+    cache_key = f"{mode}_llm_cache"
+    active_key = f"{mode}_llm_active"
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = {}
+    if active_key not in st.session_state:
+        st.session_state[active_key] = None
+
+    cols = st.columns(4)
+    for col, option in zip(cols, LLM_OPTIONS):
+        with col:
+            if st.button(option, key=f"{mode}_llm_{option}", use_container_width=True):
+                st.session_state[active_key] = option
+                if option not in st.session_state[cache_key]:
+                    if not api_key:
+                        st.session_state[cache_key][option] = (
+                            "No API key found. Set ANTHROPIC_API_KEY in your terminal before running the app."
+                        )
+                    else:
+                        with st.spinner("Thinking..."):
+                            st.session_state[cache_key][option] = get_llm_response(
+                                option=option,
+                                mode=mode,
+                                snapshot=snapshot,
+                                prediction=prediction,
+                                api_key=api_key,
+                                rec=rec,
+                            )
+
+    active_option = st.session_state.get(active_key)
+    if active_option and active_option in st.session_state[cache_key]:
+        raw = st.session_state[cache_key][active_option]
+        clean = (
+            raw.replace("`", "")
+               .replace("**", "")
+               .replace("##", "")
+               .replace("###", "")
+               .replace("*", "")
+        )
+        with st.container(border=True):
+            for para in clean.split("\n\n"):
+                para = para.strip()
+                if para:
+                    st.write(para)
+
+
 missing_paths = missing_artifact_paths()
 
 st.title("Auction IQ")
@@ -356,6 +371,10 @@ with st.sidebar:
         )
     st.markdown("**Supported checkpoints:** 25%, 50%, 75%, 85%, 90%, 95%, 100%")
     st.caption("`leading_bidder_rate_so_far` defaults to the training-set median (6.0).")
+
+    st.divider()
+    _env_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    st.session_state["anthropic_api_key"] = _env_key
 
 if missing_paths:
     st.stop()
@@ -388,11 +407,32 @@ with buyer_tab:
         rec = buyer_recommendation(buyer_snapshot, prediction["quantiles"], aggressiveness)
         explanation = build_explanation(buyer_snapshot, prediction, mode="buyer")
 
-        render_prediction_cards(prediction["point_estimate"], prediction["quantiles"])
-        render_quantile_range(prediction["quantiles"], buyer_snapshot["current_price"])
-        render_buyer_threshold_cards(rec, prediction["quantiles"])
-        render_driver_summary(prediction)
-        render_explanation(explanation)
+        st.session_state["buyer_prediction"] = prediction
+        st.session_state["buyer_snapshot"] = buyer_snapshot
+        st.session_state["buyer_rec"] = rec
+        st.session_state["buyer_explanation"] = explanation
+        st.session_state["buyer_llm_cache"] = {}
+        st.session_state["buyer_llm_active"] = None
+
+    if st.session_state.get("buyer_prediction"):
+        _pred = st.session_state["buyer_prediction"]
+        _rec = st.session_state["buyer_rec"]
+        _snap = st.session_state["buyer_snapshot"]
+        _expl = st.session_state["buyer_explanation"]
+
+        render_prediction_cards(_pred["point_estimate"], _pred["quantiles"])
+        render_quantile_range(_pred["quantiles"], _snap["current_price"])
+        render_buyer_threshold_cards(_rec, _pred["quantiles"])
+        render_driver_summary(_pred)
+        render_explanation(_expl)
+
+        st.divider()
+        render_llm_panel(
+            mode="buyer",
+            snapshot=_snap,
+            prediction=_pred,
+            rec=_rec,
+        )
 
 with seller_tab:
     st.header("Seller")
@@ -413,8 +453,28 @@ with seller_tab:
         scenarios_df = seller_scenarios(seller_snapshot)
         explanation = build_explanation(seller_snapshot, prediction, mode="seller")
 
-        render_prediction_cards(prediction["point_estimate"], prediction["quantiles"])
-        render_quantile_range(prediction["quantiles"], seller_snapshot["current_price"])
-        render_seller_chart(scenarios_df)
-        render_driver_summary(prediction)
-        render_explanation(explanation)
+        st.session_state["seller_prediction"] = prediction
+        st.session_state["seller_snapshot"] = seller_snapshot
+        st.session_state["seller_scenarios_df"] = scenarios_df
+        st.session_state["seller_explanation"] = explanation
+        st.session_state["seller_llm_cache"] = {}
+        st.session_state["seller_llm_active"] = None
+
+    if st.session_state.get("seller_prediction"):
+        _pred = st.session_state["seller_prediction"]
+        _snap = st.session_state["seller_snapshot"]
+        _expl = st.session_state["seller_explanation"]
+        _scenarios = st.session_state["seller_scenarios_df"]
+
+        render_prediction_cards(_pred["point_estimate"], _pred["quantiles"])
+        render_quantile_range(_pred["quantiles"], _snap["current_price"])
+        render_seller_chart(_scenarios)
+        render_driver_summary(_pred)
+        render_explanation(_expl)
+
+        st.divider()
+        render_llm_panel(
+            mode="seller",
+            snapshot=_snap,
+            prediction=_pred,
+        )

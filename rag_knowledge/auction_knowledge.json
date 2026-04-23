@@ -1,0 +1,158 @@
+[
+  {
+    "id": "mechanics_1",
+    "category": "auction_mechanics",
+    "title": "How eBay Proxy Bidding Works",
+    "text": "eBay uses a proxy bidding system where bidders enter their maximum willing price. The system automatically bids the minimum increment above the current leader on their behalf. This means the displayed current price often understates true competition — the leading bidder may have a much higher proxy ceiling. Non-monotonic price jumps occur when a new bidder's proxy exceeds the current leader's maximum, suddenly revealing that hidden ceiling and escalating the price in a single jump."
+  },
+  {
+    "id": "mechanics_2",
+    "category": "auction_mechanics",
+    "title": "Auction Sniping and Late Bidding",
+    "text": "Auction sniping is the strategy of placing a bid in the final seconds to prevent rivals from responding. It is common in fixed-end eBay auctions. This behavior means that the current price at 85-95% auction progress often underestimates the final price because snipe bids have not yet been placed. The Auction IQ model accounts for this implicitly through snapshot-stage features, but the q90 quantile best captures this upside risk."
+  },
+  {
+    "id": "mechanics_3",
+    "category": "auction_mechanics",
+    "title": "Price Escalation and Bidder Competition",
+    "text": "Final auction price is strongly driven by competitive pressure between bidders. When multiple bidders are close to each other's proxy limits, small incremental bids drive the price up rapidly in the final stage. The number of unique bidders is a leading indicator of this competition. Auctions with 6 or more unique bidders typically show steeper late-stage price escalation than auctions with 2-3 bidders."
+  },
+  {
+    "id": "mechanics_4",
+    "category": "auction_mechanics",
+    "title": "Opening Bid Psychology and Anchor Effects",
+    "text": "The opening bid sets a psychological anchor for auction participants. A low opening bid attracts more early bidders and can generate competitive momentum. A high opening bid filters for serious buyers but risks fewer total bids. In the Auction IQ training data, opening bid is the second most important feature (18.8% importance), directly influencing predicted final price. Sellers should set opening bids that attract early traffic without signaling desperation."
+  },
+  {
+    "id": "mechanics_5",
+    "category": "auction_mechanics",
+    "title": "Auction Duration and Final Price",
+    "text": "Longer auctions (7-day vs. 3-day) expose the item to more potential buyers and generally achieve higher final prices for popular items. However, for high-demand items, shorter auctions can create urgency and drive aggressive bidding. In the Auction IQ dataset, 7-day auctions are the most common format across all three item types. Auction duration has low feature importance (0.13%) in the model, suggesting that snapshot-level activity signals dominate duration effects."
+  },
+  {
+    "id": "model_1",
+    "category": "model_explanation",
+    "title": "What the Point Estimate Means",
+    "text": "The point estimate is a Random Forest regression prediction of the final auction closing price. It was trained on 3,514 snapshot records from 502 unique auctions using group-stratified splitting to prevent data leakage between train and test. The model achieves RMSE of $193.08 and MAE of $71.92 on the test set. The point estimate is the model's single best guess — think of it as the median expected outcome given identical historical auctions."
+  },
+  {
+    "id": "model_2",
+    "category": "model_explanation",
+    "title": "What the Quantile Predictions Mean",
+    "text": "The quantile models (q10, q50, q75, q90) represent the distribution of possible final prices, not a single guess. q10 means only 10% of similar auctions closed below this price — it is the pessimistic floor. q50 is the median outcome. q75 means 75% of similar auctions closed below this — a moderately high estimate. q90 is the optimistic ceiling — only 10% of similar auctions exceed this. The q10-q90 band captures roughly 80% of historical outcomes."
+  },
+  {
+    "id": "model_3",
+    "category": "model_explanation",
+    "title": "Feature Importance: What Drives the Prediction",
+    "text": "The Auction IQ point model assigns feature importance as follows: max_observed_bid_so_far (76.5%), opening_bid (18.8%), item_name (1.1%), unique_bidders_so_far (0.95%), bid_count_so_far (0.87%), snapshot_time_days (0.64%), leading_bidder_rate_so_far (0.57%), snapshot_pct (0.23%), auction_type (0.21%), auction_days (0.13%). The current highest bid is by far the most informative signal. This means that if you know the leading bid, you can predict final price with high confidence."
+  },
+  {
+    "id": "model_4",
+    "category": "model_explanation",
+    "title": "How Snapshot Stage Affects Prediction Accuracy",
+    "text": "Prediction accuracy improves significantly as the auction progresses. At 25% completion, uncertainty is high and quantile bands are wide. At 85-100% completion, the model has observed most of the bidding activity and the quantile bands narrow considerably. If you are evaluating an early-stage auction (25-50% progress), treat the quantile band as wider guidance. Late-stage auctions (85%+) produce tighter, more reliable estimates."
+  },
+  {
+    "id": "model_5",
+    "category": "model_explanation",
+    "title": "Model Limitations and When to Be Cautious",
+    "text": "The Auction IQ model has important limitations: (1) It was trained only on successfully sold auctions — items with no bids or unsold items are not represented. (2) It only knows three items: Cartier wristwatch, Palm Pilot M515 PDA, and Xbox game console. Predictions for other items are unreliable. (3) No seller reputation, item condition description, photos, or calendar timing (holidays, weekends) are included. (4) Proxy bidding can make bid count appear lower than actual competitive interest. Always treat predictions as guidance, not guarantees."
+  },
+  {
+    "id": "buyer_1",
+    "category": "buyer_strategy",
+    "title": "Conservative Bidding Strategy (q50 threshold)",
+    "text": "A conservative buyer uses q50 as their maximum threshold. This means they are only willing to bid if the current price is below the median expected final price. There is approximately a 50% chance the auction closes below q50. This strategy minimizes overpaying risk but also means the buyer will frequently lose auctions where competitive late-stage bidding pushes prices past median. Best suited for buyers who have alternative options and are not committed to winning this specific auction."
+  },
+  {
+    "id": "buyer_2",
+    "category": "buyer_strategy",
+    "title": "Balanced Bidding Strategy (q75 threshold)",
+    "text": "A balanced buyer uses q75 as their threshold. This means they are willing to pay up to the 75th percentile of expected final prices. Historically, 75% of similar auctions closed below this level. This strategy accepts moderate overpayment risk in exchange for a higher win probability. Best suited for buyers who want the item but still have a budget discipline. If the current price is already above q75, the competitive pool has likely narrowed to a few very motivated bidders."
+  },
+  {
+    "id": "buyer_3",
+    "category": "buyer_strategy",
+    "title": "Aggressive Bidding Strategy (q90 threshold)",
+    "text": "An aggressive buyer uses q90 as their threshold. Only 10% of similar historical auctions exceeded this price. Bidding up to q90 means accepting near-maximum competitive pressure to secure the win. This strategy is appropriate when the buyer places very high value on winning, when the item is rare, or when the buyer has strong reason to believe this auction will attract unusually high demand. The risk is overpaying significantly relative to median value."
+  },
+  {
+    "id": "buyer_4",
+    "category": "buyer_strategy",
+    "title": "When to BID vs PASS",
+    "text": "The BID recommendation means the current price is still below your chosen threshold — there is still value headroom relative to historical outcomes. The PASS recommendation means the current price has already exceeded your threshold — statistically, you would be paying more than most comparable auctions closed for. PASS does not mean the item is overpriced in absolute terms; it means you have already reached your risk limit. Consider whether the item has unique characteristics that justify exceeding model thresholds."
+  },
+  {
+    "id": "buyer_5",
+    "category": "buyer_strategy",
+    "title": "Timing Your Bid as a Buyer",
+    "text": "For a buyer watching an active auction, the optimal time to bid depends on strategy. Snipers wait until the final 30-60 seconds to avoid revealing their interest and driving up the proxy bidding. Early bidders signal interest and may deter some casual competitors but can trigger competitive escalation. The Auction IQ model does not account for bid timing within a snapshot stage, but the aggressiveness setting (Conservative/Balanced/Aggressive) implicitly encodes how much late-stage escalation you are willing to absorb."
+  },
+  {
+    "id": "seller_1",
+    "category": "seller_strategy",
+    "title": "Setting the Right Opening Bid",
+    "text": "Opening bid is the second most important model feature (18.8% importance), directly correlating with predicted final price. A higher opening bid generally predicts a higher final price — but this relationship is not causal alone. High opening bids filter out casual bidders but attract committed buyers. The seller scenario sweep in Auction IQ shows predicted final price across ±20% opening bid variations. Use the sweep to understand the sensitivity of your listing to this choice before committing."
+  },
+  {
+    "id": "seller_2",
+    "category": "seller_strategy",
+    "title": "How to Interpret the Seller Scenario Sweep",
+    "text": "The seller scenario sweep generates five predictions: -20%, -10%, base, +10%, +20% changes to the current opening bid. Each prediction uses the same snapshot data with only the opening bid modified. If the predicted final price increases proportionally with the opening bid, the item is in a demand-elastic zone where setting a higher floor pays off. If the predicted price stays flat or drops at higher opening bids (indicating fewer bids), consider a lower starting point to generate competitive momentum."
+  },
+  {
+    "id": "seller_3",
+    "category": "seller_strategy",
+    "title": "Maximizing Final Price as a Seller",
+    "text": "To maximize final price, sellers should: (1) Set an opening bid that generates early activity — low enough to attract multiple bidders but not so low it signals desperation. (2) List for 7 days when possible to maximize exposure. (3) Time listing to end on Sunday evenings when eBay traffic peaks. (4) Write detailed item descriptions and include high-quality photos — though the Auction IQ model does not use these signals, they affect real-world bidder behavior. (5) Use the seller scenario sweep to test opening bid sensitivity before listing."
+  },
+  {
+    "id": "seller_4",
+    "category": "seller_strategy",
+    "title": "When to List Based on Auction Progress Snapshot",
+    "text": "If you are evaluating a currently active auction to compare with your own upcoming listing, the snapshot analysis tells you the competitive baseline. A high bid count (10+) and multiple unique bidders (5+) in a similar auction indicate strong demand for this item category right now. Sellers should list during periods of demonstrated demand. The model's predicted final price for a comparable live auction gives you a realistic price anchor for setting your own opening bid."
+  },
+  {
+    "id": "risk_1",
+    "category": "risk_analysis",
+    "title": "Understanding Price Uncertainty from Quantile Spread",
+    "text": "The width of the q10-q90 band quantifies prediction uncertainty. A narrow band (e.g., q10=$150, q90=$200) means the model is confident — similar auctions historically converged to a tight price range. A wide band (e.g., q10=$50, q90=$400) means high uncertainty — similar auctions showed very different outcomes depending on factors the model cannot observe, such as a sudden spike in interest or a bidding war between two highly motivated buyers. Wide bands warrant extra caution for both buyers and sellers."
+  },
+  {
+    "id": "risk_2",
+    "category": "risk_analysis",
+    "title": "Buyer Overpayment Risk",
+    "text": "A buyer overpays when they win an auction at a price higher than the item's true value to them. The q90 quantile represents the upper boundary of typical auction outcomes — bidding above q90 means entering territory where very few comparable auctions have gone. Overpayment risk is highest in late-stage auctions (85%+) with many unique bidders, because competitive pressure can drive irrational escalation. The Conservative (q50) threshold is the best protection against overpayment."
+  },
+  {
+    "id": "risk_3",
+    "category": "risk_analysis",
+    "title": "Seller Underselling Risk",
+    "text": "A seller undersells when the auction closes below what the item could have achieved with a different strategy. This typically happens with: (1) an opening bid set too low with no reserve, attracting low-quality bidders; (2) listing at a low-traffic time (e.g., Monday morning); (3) poor item description deterring serious buyers. The model's q10 prediction represents the low-end outcome floor — if your listing strategy is weak, actual results may cluster near q10 rather than the point estimate. Use the seller sweep to test floor sensitivity."
+  },
+  {
+    "id": "competition_1",
+    "category": "bidder_competition",
+    "title": "What Bid Count Tells You",
+    "text": "The number of bids so far (bid_count_so_far) reflects total bidding activity, including auto-increments from the proxy system. A high bid count relative to the number of unique bidders signals that a small group of committed bidders is actively competing and repeatedly outbidding each other — this typically drives price higher in late stages. A low bid count with many unique bidders suggests broad interest but little escalation yet, meaning competitive pressure could accelerate in the final stage."
+  },
+  {
+    "id": "competition_2",
+    "category": "bidder_competition",
+    "title": "What Unique Bidder Count Tells You",
+    "text": "Unique bidders (unique_bidders_so_far) is one of the model's key competition signals (0.95% importance). More unique bidders means more independent willingness-to-pay signals in the auction. Auctions with 6+ unique bidders typically see stronger late-stage price escalation than those with 2-3. The ratio of bids to unique bidders also matters: a high ratio (e.g., 15 bids, 4 bidders) means the top bidders are heavily invested and likely to keep escalating to protect their position."
+  },
+  {
+    "id": "competition_3",
+    "category": "bidder_competition",
+    "title": "Leading Bidder Rate and Competitive Momentum",
+    "text": "The leading_bidder_rate_so_far feature captures how often the auction leader changes. A high rate means the lead has changed hands frequently — indicating a close contest between motivated bidders. A low rate means one bidder has dominated throughout, which can signal either a very high proxy ceiling deterring competition, or low overall interest. The training-set median is 6.0. The model uses this to assess competitive momentum when predicting how much further bidding will push the final price."
+  },
+  {
+    "id": "competition_4",
+    "category": "bidder_competition",
+    "title": "How the Highest Observed Bid Anchors the Prediction",
+    "text": "The max_observed_bid_so_far is the single most important model feature (76.5% importance). It is the current price ceiling visible in the auction and serves as the strongest anchor for the final price prediction. The model essentially asks: given this current ceiling and these competitive signals, how much higher will bidding go? At late auction stages (85%+), the max observed bid is very close to the final price, which is why prediction accuracy improves substantially in the final stretch."
+  }
+]
